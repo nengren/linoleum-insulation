@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Material Calculator</title>
+<style>
+  :root { --ink:#1d2433; --muted:#6b7280; --line:#e5e7eb; --accent:#0f766e; --bg:#f7f7f5; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+  main { max-width:440px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:4px 0 10px; }
+  .tabs, .units { display:flex; gap:8px; margin-bottom:12px; }
+  .tabs button, .units button { flex:1; padding:10px; border:1px solid var(--line); border-radius:8px; background:#fff; font-size:15px; color:var(--ink); }
+  .tabs button { padding:12px 8px; font-weight:600; }
+  .tabs button.on, .units button.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .sub { color:var(--muted); font-size:13px; margin:-4px 0 12px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+  label { display:block; font-size:14px; margin:8px 0 4px; }
+  label small { color:var(--muted); }
+  input { width:100%; font-size:22px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; }
+  .big { font-size:44px; font-weight:700; color:var(--accent); line-height:1; }
+  .big span { font-size:18px; font-weight:500; color:var(--ink); }
+  .row { display:flex; justify-content:space-between; gap:8px; font-size:14px; padding:4px 0; border-bottom:1px dashed var(--line); }
+  .row:last-child { border-bottom:0; }
+  .row b { text-align:right; }
+  .script { background:#f0fdfa; border-left:3px solid var(--accent); padding:10px; font-size:14px; line-height:1.5; margin-top:8px; }
+  .script b { display:block; font-size:12px; color:var(--muted); margin-bottom:2px; }
+  button.copy { margin-top:8px; width:100%; padding:12px; border:0; border-radius:8px; background:var(--ink); color:#fff; font-size:15px; }
+  .note { font-size:12px; color:var(--muted); line-height:1.5; }
+  .err { color:#b91c1c; font-size:14px; }
+  svg { width:100%; height:auto; margin-top:8px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Material Calculator</h1>
+  <div class="tabs">
+    <button id="t-lino" class="on" onclick="setProduct('lino')">Linoleum</button>
+    <button id="t-foam" onclick="setProduct('foam')">Insulation Foam</button>
+  </div>
+  <div class="sub" id="spec"></div>
+
+  <div class="card">
+    <div class="units">
+      <button id="u-m" class="on" onclick="setUnit('m')">Meters</button>
+      <button id="u-ft" onclick="setUnit('ft')">Feet</button>
+    </div>
+    <label>Length / Haba <small id="l1">(m)</small></label>
+    <input id="len" type="number" inputmode="decimal" min="0" step="0.01" placeholder="e.g. 3">
+    <label>Width / Lapad <small id="l2">(m)</small></label>
+    <input id="wid" type="number" inputmode="decimal" min="0" step="0.01" placeholder="e.g. 3">
+  </div>
+
+  <div class="card" id="out" hidden>
+    <div class="big" id="qty"></div>
+    <div id="detail" style="margin-top:10px"></div>
+    <svg id="pic" viewBox="0 0 300 200"></svg>
+    <div class="script" id="en"></div>
+    <div class="script" id="tl"></div>
+    <button class="copy" onclick="copyScript()">Copy message</button>
+  </div>
+  <div class="err" id="err"></div>
+
+  <p class="note" id="how"></p>
+</main>
+<script>
+var FT = 0.3048;
+// trim: extra on every side for trimming (m), per product
+var EPS = 1e-9;
+
+// rollW: fixed width of the roll (m). unitL: length of 1 unit sold (m).
+var PRODUCTS = {
+  lino: {
+    name: 'Linoleum', rollW: 6 * FT, unitL: 3 * FT, trim: 0.05,
+    spec: '1 qty = 3 ft long × 6 ft wide (0.91 m × 1.83 m)',
+    qtyLabel: function (q) { return q + ' <span>qty</span>'; },
+    total: function (q) { return q + ' × 3 ft = ' + (q * 3) + ' ft (' + (q * 3 * FT).toFixed(2) + ' m)'; },
+    en: function (size, q, p) { return 'For a ' + size + ' area, you need ' + q + ' qty of linoleum. It comes as one piece, ' + (q * 3) + ' ft long and 6 ft wide. Cut it into ' + strips(p.strips) + ' of ' + fmt(p.stripLen) + ' each. This already includes extra for trimming the edges.'; },
+    tl: function (size, q, p) { return 'Para sa ' + size + ' na sukat, kailangan ninyo ng ' + q + ' qty ng linoleum. Isang tuloy-tuloy na piraso ito, ' + (q * 3) + ' ft ang haba at 6 ft ang lapad. Gupitin sa ' + p.strips + ' piraso, tig-' + fmt(p.stripLen) + ' bawat isa. Kasama na rito ang sobra para sa pag-trim ng gilid.'; },
+    how: 'The roll is 6 ft (1.83 m) wide and sold by 3 ft. Multiple qty come as one continuous piece. 5 cm is added on every side for trimming.'
+  },
+  foam: {
+    name: 'Insulation Foam', rollW: 1, unitL: 1, trim: 0,
+    spec: 'Sold by the meter, 1 m wide. One continuous piece.',
+    qtyLabel: function (q) { return q + ' <span>meters</span>'; },
+    total: function (q) { return q + ' m × 1 m'; },
+    en: function (size, q, p) { return 'For a ' + size + ' area, you need ' + q + ' meters of insulation foam. It comes as one piece, ' + q + ' m long and 1 m wide. Cut it into ' + strips(p.strips) + ' of ' + fmt(p.stripLen) + ' each.'; },
+    tl: function (size, q, p) { return 'Para sa ' + size + ' na sukat, kailangan ninyo ng ' + q + ' metro ng insulation foam. Isang tuloy-tuloy na piraso ito, ' + q + ' m ang haba at 1 m ang lapad. Gupitin sa ' + p.strips + ' piraso, tig-' + fmt(p.stripLen) + ' bawat isa.'; },
+    how: 'The roll is 1 m wide and sold by the meter. Multiple meters come as one continuous piece. Exact size, no extra for trimming or overlap.'
+  }
+};
+
+var product = 'lino', unit = 'm';
+
+function ceil(x) { return Math.ceil(x - EPS); }
+function strips(n) { return n + (n > 1 ? ' strips' : ' strip'); }
+
+// One direction: strips run along `run`, laid side by side across `across`.
+function plan(run, across, pr) {
+  var n = ceil((across + 2 * pr.trim) / pr.rollW);
+  var stripLen = run + 2 * pr.trim;
+  return { strips: n, stripLen: stripLen, qty: ceil(n * stripLen / pr.unitL), run: run, across: across };
+}
+
+// Check both directions, keep the one needing fewer units (then fewer strips).
+function calc(L, W, pr) {
+  var a = plan(L, W, pr), b = plan(W, L, pr);
+  return (b.qty < a.qty || (b.qty === a.qty && b.strips < a.strips)) ? b : a;
+}
+
+function fmt(m) { return unit === 'm' ? m.toFixed(2) + ' m' : (m / FT).toFixed(1) + ' ft'; }
+function num(id) { var v = parseFloat(document.getElementById(id).value); return isFinite(v) && v > 0 ? v : 0; }
+
+function setProduct(p) {
+  product = p;
+  document.getElementById('t-lino').className = p === 'lino' ? 'on' : '';
+  document.getElementById('t-foam').className = p === 'foam' ? 'on' : '';
+  document.getElementById('spec').textContent = PRODUCTS[p].spec;
+  document.getElementById('how').textContent = 'How it works: ' + PRODUCTS[p].how +
+    ' We cut it into strips that cover the area. Both directions are checked and the one that needs less is shown.';
+  if (location.hash !== '#' + p) history.replaceState(null, '', '#' + p);
+  run();
+}
+
+function setUnit(u) {
+  var L = num('len'), W = num('wid');
+  if (u !== unit) {
+    var f = u === 'ft' ? 1 / FT : FT;
+    if (L) document.getElementById('len').value = +(L * f).toFixed(2);
+    if (W) document.getElementById('wid').value = +(W * f).toFixed(2);
+  }
+  unit = u;
+  document.getElementById('u-m').className = u === 'm' ? 'on' : '';
+  document.getElementById('u-ft').className = u === 'ft' ? 'on' : '';
+  document.getElementById('l1').textContent = document.getElementById('l2').textContent = '(' + u + ')';
+  run();
+}
+
+var lastMsg = '';
+function run() {
+  var out = document.getElementById('out'), err = document.getElementById('err');
+  var L = num('len'), W = num('wid'), pr = PRODUCTS[product];
+  err.textContent = '';
+  if (!L || !W) { out.hidden = true; return; }
+  if (unit === 'ft') { L *= FT; W *= FT; }
+  if (L > 50 || W > 50) { out.hidden = true; err.textContent = 'Please check the size (over 50 m).'; return; }
+
+  var p = calc(L, W, pr);
+  var used = p.strips * p.stripLen, bought = p.qty * pr.unitL;
+  document.getElementById('qty').innerHTML = pr.qtyLabel(p.qty);
+  document.getElementById('detail').innerHTML =
+    row('Area', fmt(L) + ' × ' + fmt(W)) +
+    row('Strips', p.strips + ' × ' + fmt(p.stripLen)) +
+    row('Total', pr.total(p.qty)) +
+    row('Leftover', fmt(bought - used));
+  draw(p, pr);
+
+  var size = fmt(L) + ' x ' + fmt(W);
+  var en = pr.en(size, p.qty, p), tl = pr.tl(size, p.qty, p);
+  document.getElementById('en').innerHTML = '<b>English</b>' + en;
+  document.getElementById('tl').innerHTML = '<b>Tagalog</b>' + tl;
+  lastMsg = en + '\n\n' + tl;
+  out.hidden = false;
+}
+
+function row(k, v) { return '<div class="row"><span>' + k + '</span><b>' + v + '</b></div>'; }
+
+function draw(p, pr) {
+  // Strips are drawn at full roll width, so a strip that sticks out past the area (waste) is visible.
+  var span = Math.max(p.across, p.strips * pr.rollW);
+  var s = Math.min(280 / p.run, 180 / span);
+  var w = p.run * s, h = p.across * s, x0 = (300 - w) / 2, y0 = (200 - span * s) / 2, g = '';
+  for (var i = 0; i < p.strips; i++) {
+    var y = y0 + i * pr.rollW * s, sh = pr.rollW * s;
+    g += '<rect x="' + x0 + '" y="' + y + '" width="' + w + '" height="' + sh + '" fill="' + (i % 2 ? '#99f6e4' : '#5eead4') + '" stroke="#fff"/>';
+    if (sh >= 14) g += '<text x="' + (x0 + 6) + '" y="' + (y + Math.min(sh, 20) - 5) + '" font-size="12" fill="#134e4a">Strip ' + (i + 1) + '</text>';
+  }
+  g += '<rect x="' + x0 + '" y="' + y0 + '" width="' + w + '" height="' + h + '" fill="none" stroke="#1d2433" stroke-width="2"/>';
+  if (span > p.across + EPS) g += '<text x="' + (x0 + w - 4) + '" y="' + (y0 + h - 4) + '" font-size="11" text-anchor="end" fill="#1d2433">area edge</text>';
+  document.getElementById('pic').innerHTML = g;
+}
+
+function copyScript() {
+  var b = document.querySelector('.copy');
+  var done = function () { b.textContent = 'Copied'; setTimeout(function () { b.textContent = 'Copy message'; }, 1500); };
+  if (navigator.clipboard) navigator.clipboard.writeText(lastMsg).then(done, function () { fallback(); done(); });
+  else { fallback(); done(); }
+}
+function fallback() {
+  var t = document.createElement('textarea'); t.value = lastMsg; document.body.appendChild(t); t.select();
+  try { document.execCommand('copy'); } catch (e) {}
+  document.body.removeChild(t);
+}
+
+document.getElementById('len').addEventListener('input', run);
+document.getElementById('wid').addEventListener('input', run);
+setProduct(location.hash === '#foam' ? 'foam' : 'lino');
+if (typeof module !== 'undefined') module.exports = { calc: calc, PRODUCTS: PRODUCTS };
+</script>
+</body>
+</html>
