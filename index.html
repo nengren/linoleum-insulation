@@ -29,7 +29,10 @@
   button.copy { margin-top:8px; width:100%; padding:12px; border:0; border-radius:8px; background:var(--ink); color:#fff; font-size:15px; }
   .note { font-size:12px; color:var(--muted); line-height:1.5; }
   .err { color:#b91c1c; font-size:14px; }
-  svg { width:100%; height:auto; margin-top:8px; }
+  svg { width:100%; height:auto; margin:6px 0 4px; }
+  .step { display:flex; gap:10px; align-items:flex-start; margin-top:14px; font-size:15px; line-height:1.4; }
+  .step .n { flex:none; width:26px; height:26px; border-radius:50%; background:var(--ink); color:#fff; font-weight:700; display:flex; align-items:center; justify-content:center; font-size:14px; }
+  .step b { color:var(--accent); }
 </style>
 </head>
 <body>
@@ -55,7 +58,11 @@
   <div class="card" id="out" hidden>
     <div class="big" id="qty"></div>
     <div id="detail" style="margin-top:10px"></div>
-    <svg id="pic" viewBox="0 0 300 200"></svg>
+    <div class="step"><span class="n">1</span><div id="s1"></div></div>
+    <div class="step"><span class="n">2</span><div id="s2"></div></div>
+    <svg id="roll" viewBox="0 0 300 104"></svg>
+    <div class="step"><span class="n">3</span><div id="s3"></div></div>
+    <svg id="room" viewBox="0 0 300 220"></svg>
     <div class="script" id="en"></div>
     <div class="script" id="tl"></div>
     <button class="copy" onclick="copyScript()">Copy message</button>
@@ -76,6 +83,7 @@ var PRODUCTS = {
     spec: '1 qty = 3 ft long × 6 ft wide (0.91 m × 1.83 m)',
     qtyLabel: function (q) { return q + ' <span>qty</span>'; },
     total: function (q) { return q + ' × 3 ft = ' + (q * 3) + ' ft (' + (q * 3 * FT).toFixed(2) + ' m)'; },
+    lenText: function (q) { return (q * 3) + ' ft (' + (q * 3 * FT).toFixed(2) + ' m)'; },
     en: function (size, q, p) { return 'For a ' + size + ' area, you need ' + q + ' qty of linoleum. It comes as one piece, ' + (q * 3) + ' ft long and 6 ft wide. Cut it into ' + strips(p.strips) + ' of ' + fmt(p.stripLen) + ' each. This already includes extra for trimming the edges.'; },
     tl: function (size, q, p) { return 'Para sa ' + size + ' na sukat, kailangan ninyo ng ' + q + ' qty ng linoleum. Isang tuloy-tuloy na piraso ito, ' + (q * 3) + ' ft ang haba at 6 ft ang lapad. Gupitin sa ' + p.strips + ' piraso, tig-' + fmt(p.stripLen) + ' bawat isa. Kasama na rito ang sobra para sa pag-trim ng gilid.'; },
     how: 'The roll is 6 ft (1.83 m) wide and sold by 3 ft. Multiple qty come as one continuous piece. 5 cm is added on every side for trimming.'
@@ -85,6 +93,7 @@ var PRODUCTS = {
     spec: 'Sold by the meter, 1 m wide. One continuous piece.',
     qtyLabel: function (q) { return q + ' <span>meters</span>'; },
     total: function (q) { return q + ' m × 1 m'; },
+    lenText: function (q) { return q + ' m'; },
     en: function (size, q, p) { return 'For a ' + size + ' area, you need ' + q + ' meters of insulation foam. It comes as one piece, ' + q + ' m long and 1 m wide. Cut it into ' + strips(p.strips) + ' of ' + fmt(p.stripLen) + ' each.'; },
     tl: function (size, q, p) { return 'Para sa ' + size + ' na sukat, kailangan ninyo ng ' + q + ' metro ng insulation foam. Isang tuloy-tuloy na piraso ito, ' + q + ' m ang haba at 1 m ang lapad. Gupitin sa ' + p.strips + ' piraso, tig-' + fmt(p.stripLen) + ' bawat isa.'; },
     how: 'The roll is 1 m wide and sold by the meter. Multiple meters come as one continuous piece. Exact size, no extra for trimming or overlap.'
@@ -151,10 +160,15 @@ function run() {
   document.getElementById('qty').innerHTML = pr.qtyLabel(p.qty);
   document.getElementById('detail').innerHTML =
     row('Area', fmt(L) + ' × ' + fmt(W)) +
-    row('Strips', p.strips + ' × ' + fmt(p.stripLen)) +
-    row('Total', pr.total(p.qty)) +
     row('Leftover', fmt(bought - used));
-  draw(p, pr);
+  var lastW = lastStripWidth(p, pr);
+  document.getElementById('s1').innerHTML = '<b>Buy ' + pr.qtyLabel(p.qty).replace(/<[^>]+>/g, '') + '</b>: one piece, ' + pr.lenText(p.qty) + ' long, ' + fmt(pr.rollW) + ' wide.';
+  document.getElementById('s2').innerHTML = '<b>Cut</b> it into <b>' + p.strips + '</b> ' + (p.strips > 1 ? 'pieces' : 'piece') + ', each <b>' + fmt(p.stripLen) + '</b> long.' + (bought - used > 0.005 ? ' The grey part is left over.' : '');
+  document.getElementById('s3').innerHTML = '<b>Lay</b> the pieces side by side, in number order.' +
+    (lastW ? ' Piece <b>' + p.strips + '</b>: cut it narrower, to <b>' + fmt(lastW) + '</b> wide (cut along its length).' : '') +
+    (pr.trim ? ' Each piece has ' + Math.round(pr.trim * 100) + ' cm extra at the walls for trimming.' : '');
+  drawRoll(p, pr);
+  drawRoom(p, pr);
 
   var size = fmt(L) + ' x ' + fmt(W);
   var en = pr.en(size, p.qty, p), tl = pr.tl(size, p.qty, p);
@@ -166,19 +180,66 @@ function run() {
 
 function row(k, v) { return '<div class="row"><span>' + k + '</span><b>' + v + '</b></div>'; }
 
-function draw(p, pr) {
-  // Strips are drawn at full roll width, so a strip that sticks out past the area (waste) is visible.
-  var span = Math.max(p.across, p.strips * pr.rollW);
-  var s = Math.min(280 / p.run, 180 / span);
-  var w = p.run * s, h = p.across * s, x0 = (300 - w) / 2, y0 = (200 - span * s) / 2, g = '';
+var COLORS = ['#5eead4', '#fcd34d', '#93c5fd', '#f9a8d4', '#c4b5fd', '#fdba74'];
+function col(i) { return COLORS[i % COLORS.length]; }
+function badge(x, y, n, r) {
+  r = r || 9;
+  return '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="#1d2433"/><text x="' + x + '" y="' + (y + r * 0.45) + '" font-size="' + (r * 1.2).toFixed(1) + '" font-weight="700" text-anchor="middle" fill="#fff">' + n + '</text>';
+}
+var HATCH = '<defs><pattern id="h" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="#e5e7eb"/><line x1="0" y1="0" x2="0" y2="6" stroke="#9ca3af" stroke-width="2"/></pattern></defs>';
+
+// Width the last piece must be cut down to, or 0 if it is used at full width.
+function lastStripWidth(p, pr) {
+  var need = p.across + 2 * pr.trim - (p.strips - 1) * pr.rollW;
+  return need < pr.rollW - 0.005 ? need : 0;
+}
+
+// Step 2 picture: the bought piece as one long bar, with cut lines.
+function drawRoll(p, pr) {
+  var total = p.qty * pr.unitL, x0 = 10, W = 280, k = W / total, y = 30, h = 40, g = HATCH;
+  g += '<text x="' + x0 + '" y="16" font-size="12" fill="#1d2433">One piece: ' + pr.total(p.qty) + '</text>';
+  g += '<rect x="' + x0 + '" y="' + y + '" width="' + W + '" height="' + h + '" fill="url(#h)"/>';
   for (var i = 0; i < p.strips; i++) {
-    var y = y0 + i * pr.rollW * s, sh = pr.rollW * s;
-    g += '<rect x="' + x0 + '" y="' + y + '" width="' + w + '" height="' + sh + '" fill="' + (i % 2 ? '#99f6e4' : '#5eead4') + '" stroke="#fff"/>';
-    if (sh >= 14) g += '<text x="' + (x0 + 6) + '" y="' + (y + Math.min(sh, 20) - 5) + '" font-size="12" fill="#134e4a">Strip ' + (i + 1) + '</text>';
+    var x = x0 + i * p.stripLen * k, w = p.stripLen * k;
+    g += '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" fill="' + col(i) + '"/>';
+    if (w >= 20) g += badge(x + w / 2, y + h / 2, i + 1);
+    if (w >= 46) g += '<text x="' + (x + w / 2) + '" y="' + (y + h + 15) + '" font-size="11" text-anchor="middle" fill="#1d2433">' + fmt(p.stripLen) + '</text>';
+    if (i > 0) g += '<line x1="' + x + '" y1="' + (y - 6) + '" x2="' + x + '" y2="' + (y + h + 4) + '" stroke="#dc2626" stroke-width="2" stroke-dasharray="4 3"/>';
   }
-  g += '<rect x="' + x0 + '" y="' + y0 + '" width="' + w + '" height="' + h + '" fill="none" stroke="#1d2433" stroke-width="2"/>';
-  if (span > p.across + EPS) g += '<text x="' + (x0 + w - 4) + '" y="' + (y0 + h - 4) + '" font-size="11" text-anchor="end" fill="#1d2433">area edge</text>';
-  document.getElementById('pic').innerHTML = g;
+  var usedW = p.strips * p.stripLen * k;
+  if (W - usedW > 1) g += '<line x1="' + (x0 + usedW) + '" y1="' + (y - 6) + '" x2="' + (x0 + usedW) + '" y2="' + (y + h + 4) + '" stroke="#dc2626" stroke-width="2" stroke-dasharray="4 3"/>';
+  g += '<rect x="' + x0 + '" y="' + y + '" width="' + W + '" height="' + h + '" fill="none" stroke="#1d2433" stroke-width="1.5"/>';
+  g += '<text x="' + (x0 + W) + '" y="' + (y + h + 30) + '" font-size="11" text-anchor="end" fill="#dc2626">- - - cut here</text>';
+  document.getElementById('roll').innerHTML = g;
+}
+
+// Step 3 picture: the room, longer side across, pieces laid in it with the same colours and numbers.
+function drawRoom(p, pr) {
+  var horiz = p.run >= p.across;                // pieces lie left-right if they run along the longer side
+  var RL = horiz ? p.run : p.across, RW = horiz ? p.across : p.run;   // room drawn RL wide, RW tall
+  var lastW = lastStripWidth(p, pr), cutOff = lastW ? pr.rollW - lastW : 0;
+  var spanRL = horiz ? RL : RL + cutOff, spanRW = horiz ? RW + cutOff : RW;
+  var s = Math.min(250 / spanRL, 160 / spanRW);
+  var x0 = 34, y0 = 30, w = RL * s, h = RW * s, g = HATCH;
+  for (var i = 0; i < p.strips; i++) {
+    var a = i * pr.rollW, b = Math.min((i + 1) * pr.rollW, p.across);   // position across the pieces
+    if (b <= a) continue;
+    var r = horiz ? [x0, y0 + a * s, w, (b - a) * s] : [x0 + a * s, y0, (b - a) * s, h];
+    g += '<rect x="' + r[0] + '" y="' + r[1] + '" width="' + r[2] + '" height="' + r[3] + '" fill="' + col(i) + '" stroke="#fff" stroke-width="1.5"/>';
+    var m = Math.min(r[2], r[3]);
+    if (m >= 12) g += badge(r[0] + r[2] / 2, r[1] + r[3] / 2, i + 1, Math.min(9, m / 2 - 1));
+  }
+  if (cutOff > 0.005) {
+    var c = horiz ? [x0, y0 + h, w, cutOff * s] : [x0 + w, y0, cutOff * s, h];
+    g += '<rect x="' + c[0] + '" y="' + c[1] + '" width="' + c[2] + '" height="' + c[3] + '" fill="url(#h)" stroke="#9ca3af" stroke-dasharray="3 3"/>';
+    if ((horiz ? c[3] : c[2]) >= 14) g += '<text x="' + (c[0] + c[2] / 2) + '" y="' + (c[1] + c[3] / 2 + 4) + '" font-size="11" text-anchor="middle" fill="#374151"' + (horiz ? '' : ' transform="rotate(-90 ' + (c[0] + c[2] / 2) + ' ' + (c[1] + c[3] / 2) + ')"') + '>cut off</text>';
+  }
+  g += '<rect x="' + x0 + '" y="' + y0 + '" width="' + w + '" height="' + h + '" fill="none" stroke="#1d2433" stroke-width="2.5"/>';
+  g += '<text x="' + (x0 + w / 2) + '" y="' + (y0 - 10) + '" font-size="12" text-anchor="middle" fill="#1d2433">' + fmt(RL) + '</text>';
+  g += '<text x="' + (x0 - 10) + '" y="' + (y0 + h / 2) + '" font-size="12" text-anchor="middle" fill="#1d2433" transform="rotate(-90 ' + (x0 - 10) + ' ' + (y0 + h / 2) + ')">' + fmt(RW) + '</text>';
+  var svg = document.getElementById('room');
+  svg.setAttribute('viewBox', '0 0 300 ' + Math.ceil(y0 + Math.max(h, spanRW * s) + 12));
+  svg.innerHTML = g;
 }
 
 function copyScript() {
